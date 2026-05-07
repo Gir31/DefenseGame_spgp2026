@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">DefenseGame</string>
+    <string name="start_defense_game">Start Defense Game</string>
 </resources>

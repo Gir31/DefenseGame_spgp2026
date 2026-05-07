@@ -14,7 +14,7 @@ class MainScene(gctx : GameContext) : Scene(gctx) {
 
     override val clipsRect = true
 
-    private val grid = GridBackground(gctx, 10, 10);
+    private val grid = GridBackground(gctx, 10, 5);
 
     override val world = World(Layer.entries.toTypedArray()).apply {
         add(grid, Layer.GRID)
@@ -24,7 +24,16 @@ class MainScene(gctx : GameContext) : Scene(gctx) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        return false
+        val rawX = event.x
+        val rawY = event.y
+
+        val pt = gctx.metrics.fromScreen(rawX, rawY)
+
+        if (event.action == MotionEvent.ACTION_MOVE || event.action == MotionEvent.ACTION_DOWN) {
+            grid.onMouseMove(pt.x, pt.y)
+        }
+
+        return true
     }
 
 }

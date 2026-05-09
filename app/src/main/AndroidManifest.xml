@@ -14,8 +14,7 @@
         android:theme="@style/Theme.DefenseGame">
         <activity
             android:name=".DefenseGameActivity"
-            android:exported="false"
-            android:screenOrientation="nosensor" />
+            android:exported="false"/>
         <activity
             android:name=".MainActivity"
             android:exported="true">

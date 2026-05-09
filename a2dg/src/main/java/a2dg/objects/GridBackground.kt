@@ -42,22 +42,16 @@ class GridBackground(
 
     override fun draw(canvas: Canvas) {
         hoveredCell?.let { (c, r) ->
-            rect.set(
-                c * cellWidth,
-                r * cellHeight,
-                (c + 1) * cellWidth,
-                (r + 1) * cellHeight
-            )
+            rect.set(c * cellWidth, r * cellHeight, (c + 1) * cellWidth, (r + 1) * cellHeight)
             canvas.drawRect(rect, highlightPaint)
         }
 
+        // 2. 격자 선만 그리기 (타일 색상은 TileObject가 그림)
         for (c in 0..cols) {
-            val x = c * cellWidth
-            canvas.drawLine(x, 0f, x, screenHeight, linePaint)
+            canvas.drawLine(c * cellWidth, 0f, c * cellWidth, screenHeight, linePaint)
         }
         for (r in 0..rows) {
-            val y = r * cellHeight
-            canvas.drawLine(0f, y, screenWidth, y, linePaint)
+            canvas.drawLine(0f, r * cellHeight, screenWidth, r * cellHeight, linePaint)
         }
     }
 

@@ -6,17 +6,23 @@ import a2dg.scene.World
 import a2dg.view.GameContext
 import android.view.MotionEvent
 
-class MainScene(gctx : GameContext) : Scene(gctx) {
+class MainScene(gctx : GameContext, private val stage: Int) : Scene(gctx) {
 
     enum class Layer {
-        GRID
+        CONTROLLER,
+        GRID,
     }
 
     override val clipsRect = true
 
-    private val grid = GridBackground(gctx, 10, 5);
+    init {
+        MapObjectCatalog.registerAll()
+    }
+
+    private val grid = GridBackground(gctx, 10, 30);
 
     override val world = World(Layer.entries.toTypedArray()).apply {
+        add(MapLoader(gctx, this, stage), Layer.CONTROLLER)
         add(grid, Layer.GRID)
     }
 

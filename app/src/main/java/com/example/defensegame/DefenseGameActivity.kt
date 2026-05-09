@@ -16,6 +16,6 @@ class DefenseGameActivity :  BaseGameActivity() {
 
         gctx.metrics.setSize(1600f, 900f)
 
-        return MainScene(gctx)
+        return MainScene(gctx, 1)
     }
 }

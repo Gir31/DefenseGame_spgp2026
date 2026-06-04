@@ -1,42 +1,23 @@
 package com.example.defensegame
 
-import a2dg.view.GameContext
-
-fun interface MapObjectCreator {
-    fun create(gctx: GameContext, tile: Char, left: Float, top: Float): MapObject?
-}
-
-// 디버깅을 위한 타일 정보
+// 타일 한 종류에 대한 메타 정보를 담는 데이터 클래스이다.
+// isElevatedPlaceable : 일반 지형(B) — Archer·Mage·Cleric 배치 가능
+// isGroundPlaceable   : 적 경로(R) — Warrior·Rogue 배치 가능 (적을 막아 섬)
+// isWalkable          : 적이 이동할 수 있는 타일인지 여부
+// resId               : 타일을 그릴 때 사용할 res/mipmap 리소스 ID
 data class TileInfo(
-    val isPlaceable: Boolean, // 유닛 배치 가능 여부
-    val isWalkable: Boolean,  // 적 이동 가능 여부
-    val color: Int            // 출력할 색상
+    val isElevatedPlaceable: Boolean,  // 고지대 배치 (Archer/Mage/Cleric)
+    val isGroundPlaceable:   Boolean,  // 길 위 배치  (Warrior/Rogue)
+    val isWalkable:          Boolean,
+    val resId:               Int,
 )
 
 object MapObjectRegistry {
-    /*private val creators = mutableMapOf<Char, com.example.defensegame.MapObjectCreator>()
+    private val infos = mutableMapOf<Char, TileInfo>()
 
-    fun register(ch: Char, creator: com.example.defensegame.MapObjectCreator) {
-        creators[ch] = creator
+    fun register(ch: Char, info: TileInfo) {
+        infos[ch] = info
     }
 
-    fun register(chars: CharRange, creator: com.example.defensegame.MapObjectCreator) {
-        for (ch in chars) {
-            creators[ch] = creator
-        }
-    }
-
-    fun create(gctx: GameContext, tile: Char, left: Float, top: Float): MapObject? {
-        return creators[tile]?.create(gctx, tile, left, top)
-    }*/
-    private val creators = mutableMapOf<Char, (Char) -> TileInfo>()
-
-    fun register(ch: Char, creator: (Char) -> TileInfo) {
-        creators[ch] = creator
-    }
-
-    fun getInfo(tile: Char): TileInfo? {
-        // 등록된 생성 함수를 실행해서 정보를 가져옴
-        return creators[tile]?.invoke(tile)
-    }
+    fun getInfo(tile: Char): TileInfo? = infos[tile]
 }

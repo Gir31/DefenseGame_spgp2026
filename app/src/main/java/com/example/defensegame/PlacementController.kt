@@ -37,8 +37,8 @@ class PlacementController(
     // ── 회수/스킬 팝업 ────────────────────────────────────────────────────────
     private var popupUnit: PlayerUnit? = null
     private var popupKey: Pair<Int, Int>? = null
-    private val popupRect  = RectF()
-    private val skillBtnR  = RectF()
+    private val popupRect   = RectF()
+    private val skillBtnR   = RectF()
     private val retreatBtnR = RectF()
 
     // ── 아이콘 비트맵 ─────────────────────────────────────────────────────────
@@ -55,9 +55,9 @@ class PlacementController(
         val gx = pt.x; val gy = pt.y
 
         return when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> handleDown(gx, gy)
-            MotionEvent.ACTION_MOVE -> { if (isDragging) { updateDrag(gx, gy); true } else false }
-            MotionEvent.ACTION_UP   -> handleUp(gx, gy)
+            MotionEvent.ACTION_DOWN   -> handleDown(gx, gy)
+            MotionEvent.ACTION_MOVE   -> { if (isDragging) { updateDrag(gx, gy); true } else false }
+            MotionEvent.ACTION_UP     -> handleUp(gx, gy)
             MotionEvent.ACTION_CANCEL -> { cancelDrag(); false }
             else -> false
         }
@@ -102,10 +102,10 @@ class PlacementController(
     // ── 팝업 ─────────────────────────────────────────────────────────────────
     private fun showPopup(unit: PlayerUnit, key: Pair<Int, Int>, gx: Float, gy: Float) {
         popupUnit = unit; popupKey = key
-        val px = unit.x; val py = unit.y - Balance.Unit.unitSize / 2f - 90f
+        val px = unit.x; val py = unit.y - unit.unitType.size / 2f - 90f
         popupRect.set(px - 110f, py - 10f, px + 110f, py + 80f)
         skillBtnR.set(px - 100f, py, px,         py + 66f)
-        retreatBtnR.set(px,     py, px + 100f,   py + 66f)
+        retreatBtnR.set(px,      py, px + 100f,  py + 66f)
     }
 
     private fun dismissPopup() { popupUnit = null; popupKey = null }
@@ -113,23 +113,26 @@ class PlacementController(
     private fun doRetreat() {
         val unit = popupUnit ?: return
         val key  = popupKey  ?: return
-        world.remove(unit, MainScene.Layer.UNIT)
-        tileGrid.vacate(key.first, key.second)
-        deployedUnits.remove(key)
+        removeUnit(unit, key)
         energy.add(unit.unitType.energyCost * Balance.Unit.retreatRefundRatio)
         cooldowns[unit.unitType] = unit.unitType.retreatCooldown
         dismissPopup()
+    }
+
+    // ── 유닛 제거 공통 처리 ───────────────────────────────────────────────────
+    // 회수(doRetreat)와 사망(onDied 콜백) 양쪽에서 호출한다.
+    private fun removeUnit(unit: PlayerUnit, key: Pair<Int, Int>) {
+        world.remove(unit, MainScene.Layer.UNIT)
+        tileGrid.vacate(key.first, key.second)
+        deployedUnits.remove(key)
+        // 팝업이 이 유닛을 가리키고 있었다면 닫는다.
+        if (popupUnit === unit) dismissPopup()
     }
 
     // ── 배치 ─────────────────────────────────────────────────────────────────
     private fun hitTestBar(gx: Float, gy: Float): PlayerUnit.Type? {
         if (gy < BAR_TOP) return null
         return PlayerUnit.Type.entries.getOrNull((gx / SLOT_W).toInt())
-    }
-
-    private fun canPlaceAt(col: Int, row: Int): Boolean {
-        val type = selected ?: return false
-        return tileGrid.isPlaceableFor(col, row, type.placementType)
     }
 
     private fun isCoolingDown(type: PlayerUnit.Type) =
@@ -148,10 +151,18 @@ class PlacementController(
         if (!energy.spend(type.energyCost)) return
         val cx = hoverCol * cellW + cellW / 2f
         val cy = hoverRow * cellH + cellH / 2f
-        val unit = PlayerUnit.create(gctx, type).apply { placeAt(cx, cy) }
+        val key = hoverCol to hoverRow
+        val unit = PlayerUnit.create(gctx, type).apply {
+            placeAt(cx, cy)
+            // 사망 시 자동으로 world 제거 + 타일 반환 + 쿨다운 시작
+            onDied = {
+                removeUnit(this, key)
+                cooldowns[unitType] = unitType.retreatCooldown
+            }
+        }
         world.add(unit, MainScene.Layer.UNIT)
         tileGrid.occupy(hoverCol, hoverRow)
-        deployedUnits[hoverCol to hoverRow] = unit
+        deployedUnits[key] = unit
     }
 
     private fun cancelDrag() {
@@ -161,7 +172,6 @@ class PlacementController(
 
     // ───── 업데이트 ──────────────────────────────────────────────────────────
     override fun update(gctx: GameContext) {
-        // 쿨다운 감소
         for (type in cooldowns.keys.toList()) {
             val remaining = (cooldowns[type] ?: 0f) - gctx.frameTime
             if (remaining <= 0f) cooldowns.remove(type)
@@ -191,22 +201,18 @@ class PlacementController(
             val card = RectF(cx - CARD_W / 2f, BAR_TOP + 6f, cx + CARD_W / 2f, 894f)
             canvas.drawRoundRect(card, 10f, 10f, if (available) cardPaint else cardDimPaint)
 
-            // 아이콘
             val iSize = 58f
             val iconRect = RectF(cx - iSize/2f, BAR_TOP + 10f, cx + iSize/2f, BAR_TOP + 10f + iSize)
             canvas.drawBitmap(icons[i], null, iconRect, if (available) null else dimIconPaint)
 
-            // 쿨다운 오버레이
             if (cd > 0f) {
                 canvas.drawRoundRect(card, 10f, 10f, cooldownOverlayPaint)
                 canvas.drawText("%.0fs".format(cd), cx, BAR_TOP + 48f, cooldownTextPaint)
             }
 
-            // 비용
             canvas.drawText("${type.energyCost}", cx, 888f,
                 if (available) costPaint else costDimPaint)
 
-            // 선택 강조
             if (selected == type && isDragging)
                 canvas.drawRoundRect(card, 10f, 10f, selectedBorderPaint)
         }
@@ -233,7 +239,7 @@ class PlacementController(
     // ── 드래그 중 아이콘 ─────────────────────────────────────────────────────
     private fun drawDraggingIcon(canvas: Canvas) {
         val type = selected ?: return
-        val s = Balance.Unit.unitSize
+        val s = type.size
         canvas.drawBitmap(icons[type.ordinal], null,
             RectF(dragX - s/2f, dragY - s - 10f, dragX + s/2f, dragY - 10f), null)
         canvas.drawText(type.name, dragX, dragY - s - 16f, dragLabelPaint)
@@ -244,23 +250,18 @@ class PlacementController(
         val unit = popupUnit ?: return
         canvas.drawRoundRect(popupRect, 12f, 12f, popupBgPaint)
 
-        // 스킬 버튼
         val skillPaint = if (unit.skillReady) skillReadyBtnPaint else skillDimBtnPaint
         canvas.drawRoundRect(skillBtnR, 8f, 8f, skillPaint)
         canvas.drawText("스킬", skillBtnR.centerX(), skillBtnR.centerY() + 12f, popupBtnTextPaint)
-        if (unit.skillReady) {
-            // 준비 완료 표시
+        if (unit.skillReady)
             canvas.drawRoundRect(skillBtnR, 8f, 8f, skillReadyBorderPaint)
-        }
 
-        // 회수 버튼
         canvas.drawRoundRect(retreatBtnR, 8f, 8f, retreatBtnPaint)
         canvas.drawText("회수", retreatBtnR.centerX(), retreatBtnR.centerY() + 12f, popupBtnTextPaint)
 
-        // SP 게이지 (팝업 위)
-        val spW = popupRect.width() - 10f
+        val spW    = popupRect.width() - 10f
         val spLeft = popupRect.left + 5f
-        val spY = popupRect.top - 18f
+        val spY    = popupRect.top - 18f
         canvas.drawRoundRect(spLeft, spY, spLeft + spW, spY + 10f, 5f, 5f, spBgPaint)
         val fill = spW * (unit.sp / Balance.Unit.maxSp)
         if (fill > 0f)
@@ -283,48 +284,46 @@ class PlacementController(
 
         private val SPEED_BTN = RectF(1530f, 10f, 1590f, 60f)
 
-        private val barBgPaint         = Paint().apply { color = "#EE1A1A2E".toColorInt() }
-        private val dividerPaint        = Paint().apply { color = "#FF44BBFF".toColorInt(); strokeWidth = 2f }
-        private val cardPaint           = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC2A2A3E".toColorInt() }
-        private val cardDimPaint        = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC151520".toColorInt() }
-        private val dimIconPaint        = Paint().apply { alpha = 70 }
-        private val cooldownOverlayPaint= Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#AA000000".toColorInt() }
-        private val cooldownTextPaint   = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val barBgPaint          = Paint().apply { color = "#EE1A1A2E".toColorInt() }
+        private val dividerPaint         = Paint().apply { color = "#FF44BBFF".toColorInt(); strokeWidth = 2f }
+        private val cardPaint            = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC2A2A3E".toColorInt() }
+        private val cardDimPaint         = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC151520".toColorInt() }
+        private val dimIconPaint         = Paint().apply { alpha = 70 }
+        private val cooldownOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#AA000000".toColorInt() }
+        private val cooldownTextPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE; textSize = 28f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
         }
-        private val selectedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val selectedBorderPaint  = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; color = "#FF44BBFF".toColorInt(); strokeWidth = 3f
         }
-        private val costPaint           = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val costPaint            = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = "#FFFFD700".toColorInt(); textSize = 26f; textAlign = Paint.Align.CENTER
         }
-        private val costDimPaint        = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val costDimPaint         = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = "#88888888".toColorInt(); textSize = 26f; textAlign = Paint.Align.CENTER
         }
-        private val validTilePaint      = Paint().apply { color = "#5500FF88".toColorInt() }
-        private val hoverValidPaint     = Paint().apply { color = "#AA00FF88".toColorInt() }
-        private val hoverInvalidPaint   = Paint().apply { color = "#AAFF2200".toColorInt() }
-        private val dragLabelPaint      = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val validTilePaint       = Paint().apply { color = "#5500FF88".toColorInt() }
+        private val hoverValidPaint      = Paint().apply { color = "#AA00FF88".toColorInt() }
+        private val hoverInvalidPaint    = Paint().apply { color = "#AAFF2200".toColorInt() }
+        private val dragLabelPaint       = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE; textSize = 24f; textAlign = Paint.Align.CENTER
         }
-        // 팝업
-        private val popupBgPaint        = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#EE1A1A2E".toColorInt() }
-        private val skillReadyBtnPaint  = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF1A3A6C".toColorInt() }
-        private val skillDimBtnPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF111118".toColorInt() }
+        private val popupBgPaint         = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#EE1A1A2E".toColorInt() }
+        private val skillReadyBtnPaint   = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF1A3A6C".toColorInt() }
+        private val skillDimBtnPaint     = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF111118".toColorInt() }
         private val skillReadyBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = 2.5f; color = "#FFFFFFEE".toColorInt()
         }
-        private val retreatBtnPaint     = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF4A1A1A".toColorInt() }
-        private val popupBtnTextPaint   = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val retreatBtnPaint      = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#FF4A1A1A".toColorInt() }
+        private val popupBtnTextPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE; textSize = 28f; textAlign = Paint.Align.CENTER
         }
-        private val spBgPaint           = Paint().apply { color = "#55FFFFFF".toColorInt() }
-        private val spFillPaint         = Paint().apply { color = "#FFFFCC00".toColorInt() }
-        private val spReadyPaint        = Paint().apply { color = "#FFFFFFEE".toColorInt() }
-        // 배속 버튼
-        private val speedNormalPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC1A2A3A".toColorInt() }
-        private val speedActivePaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC2A4A1A".toColorInt() }
-        private val speedTextPaint      = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val spBgPaint            = Paint().apply { color = "#55FFFFFF".toColorInt() }
+        private val spFillPaint          = Paint().apply { color = "#FFFFCC00".toColorInt() }
+        private val spReadyPaint         = Paint().apply { color = "#FFFFFFEE".toColorInt() }
+        private val speedNormalPaint     = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC1A2A3A".toColorInt() }
+        private val speedActivePaint     = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#CC2A4A1A".toColorInt() }
+        private val speedTextPaint       = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE; textSize = 26f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
         }
     }

@@ -32,7 +32,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
     ) {
         NORMAL(
             Balance.Enemy.normalHp,  Balance.Enemy.normalDef,  Balance.Enemy.normalRes,
-            18f, 1.2f, Balance.Enemy.normalSpeed, Balance.Enemy.normalSize,
+            Balance.Enemy.normalAtk, Balance.Enemy.normalInterval, Balance.Enemy.normalSpeed, Balance.Enemy.normalSize,
             Balance.Enemy.normalEnergyReward,
             idleResId   = R.mipmap.enemy_normal,
             attackResId = R.mipmap.enemy_normal_attack,
@@ -41,7 +41,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
         ),
         TANKER(
             Balance.Enemy.tankerHp,  Balance.Enemy.tankerDef,  Balance.Enemy.tankerRes,
-            30f, 1.8f, Balance.Enemy.tankerSpeed, Balance.Enemy.tankerSize,
+            Balance.Enemy.tankerAtk, Balance.Enemy.tankerInterval, Balance.Enemy.tankerSpeed, Balance.Enemy.tankerSize,
             Balance.Enemy.tankerEnergyReward,
             idleResId   = R.mipmap.enemy_tanker,
             attackResId = R.mipmap.enemy_tanker_attack,
@@ -50,7 +50,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
         ),
         SWARM(
             Balance.Enemy.swarmHp,   Balance.Enemy.swarmDef,   Balance.Enemy.swarmRes,
-            10f, 0.7f, Balance.Enemy.swarmSpeed, Balance.Enemy.swarmSize,
+            Balance.Enemy.swarmAtk, Balance.Enemy.swarmInterval, Balance.Enemy.swarmSpeed, Balance.Enemy.swarmSize,
             Balance.Enemy.swarmEnergyReward,
             idleResId   = R.mipmap.enemy_swarm,
             attackResId = R.mipmap.enemy_swarm_attack,
@@ -59,7 +59,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
         ),
         SPECIAL(
             Balance.Enemy.specialHp, Balance.Enemy.specialDef, Balance.Enemy.specialRes,
-            22f, 1.4f, Balance.Enemy.specialSpeed, Balance.Enemy.specialSize,
+            Balance.Enemy.specialAtk, Balance.Enemy.specialInterval, Balance.Enemy.specialSpeed, Balance.Enemy.specialSize,
             Balance.Enemy.specialEnergyReward,
             idleResId   = R.mipmap.enemy_special,
             attackResId = R.mipmap.enemy_special_attack,
@@ -68,7 +68,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
         ),
         RANGED(
             Balance.Enemy.rangedHp,  Balance.Enemy.rangedDef,  Balance.Enemy.rangedRes,
-            15f, 1.5f, Balance.Enemy.rangedSpeed, Balance.Enemy.rangedSize,
+            Balance.Enemy.rangedAtk, Balance.Enemy.rangedInterval, Balance.Enemy.rangedSpeed, Balance.Enemy.rangedSize,
             Balance.Enemy.rangedEnergyReward,
             idleResId   = R.mipmap.enemy_ranged,
             attackResId = R.mipmap.enemy_ranged_attack,
@@ -109,14 +109,11 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
         // IDLE 비트맵 교체 (오브젝트 풀 재활용 시 타입이 바뀔 수 있음)
         refreshIdleBitmap(type.idleResId)
 
-        // ATTACK: 전용 리소스가 있으면 등록, 없으면 idle 스프라이트로 대체
-        val atkResId = type.attackResId ?: type.idleResId
-        registerAnim(State.ATTACK, atkResId, type.attackFps)
+        // ATTACK / DIE 애니메이션 등록
+        registerAnim(State.ATTACK, type.attackResId ?: type.idleResId, type.attackFps)
+        registerAnim(State.DIE,    type.dieResId    ?: type.idleResId, type.dieFps)
 
-        // DIE: 전용 리소스가 있으면 등록, 없으면 idle 스프라이트로 대체
-        val dieResId = type.dieResId ?: type.idleResId
-        registerAnim(State.DIE, dieResId, type.dieFps)
-
+        // 오브젝트 풀 재활용 시 이전 DIE 상태 잠금 등을 초기화한다
         resetToIdle()
         return this
     }
@@ -125,7 +122,7 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
     override fun update(gctx: GameContext) {
         // DIE 애니메이션 완료 → World 에서 제거
         if (pendingRemoval) {
-            if (deathAnimDone) {
+            if (isDieAnimFinished()) {
                 gctx.mainWorld().remove(this, MainScene.Layer.ENEMY)
             }
             return
@@ -209,7 +206,9 @@ class Enemy private constructor(gctx: GameContext, resId: Int) :
     private fun startDying() {
         if (pendingRemoval) return
         pendingRemoval = true
-        playAnim(State.DIE)
+        // dieFps 와 프레임 수(약 8프레임)로 재생 시간 계산
+        val dieDurMs = (1000f / type.dieFps * 8).toLong()
+        playAnim(State.DIE, durationMs = dieDurMs)
     }
 
     // ───── IRecyclable ───────────────────────────────────────────────────────

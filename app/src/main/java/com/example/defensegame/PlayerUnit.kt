@@ -43,6 +43,7 @@ open class PlayerUnit protected constructor(
         val attackFps: Float,
         val skillFps:  Float,
         val dieFps:    Float,
+        val size:      Float,
     ) {
         WARRIOR(
             Balance.Unit.warriorHp, Balance.Unit.warriorDef, Balance.Unit.warriorMr,
@@ -54,7 +55,8 @@ open class PlayerUnit protected constructor(
             attackResId = R.mipmap.unit_warrior_attack,
             skillResId  = R.mipmap.unit_warrior_skill,
             dieResId    = R.mipmap.unit_warrior_die,
-            idleFps = 6f, attackFps = 10f, skillFps = 8f, dieFps = 8f,
+            idleFps = 8f, attackFps = 9f, skillFps = 9f, dieFps = 9f,
+            size = 138f,
         ),
         ROGUE(
             Balance.Unit.rogueHp, Balance.Unit.rogueDef, Balance.Unit.rogueMr,
@@ -66,7 +68,8 @@ open class PlayerUnit protected constructor(
             attackResId = R.mipmap.unit_rogue_attack,
             skillResId  = R.mipmap.unit_rogue_skill,
             dieResId    = R.mipmap.unit_rogue_die,
-            idleFps = 8f, attackFps = 14f, skillFps = 12f, dieFps = 8f,
+            idleFps = 8f, attackFps = 9f, skillFps = 9f, dieFps = 9f,
+            size = 138f,
         ),
         ARCHER(
             Balance.Unit.archerHp, Balance.Unit.archerDef, Balance.Unit.archerMr,
@@ -78,7 +81,8 @@ open class PlayerUnit protected constructor(
             attackResId = R.mipmap.unit_archer_attack,
             skillResId  = R.mipmap.unit_archer_skill,
             dieResId    = R.mipmap.unit_archer_die,
-            idleFps = 6f, attackFps = 10f, skillFps = 10f, dieFps = 8f,
+            idleFps = 8f, attackFps = 9f, skillFps = 9f, dieFps = 9f,
+            size = 174f,
         ),
         MAGE(
             Balance.Unit.mageHp, Balance.Unit.mageDef, Balance.Unit.mageMr,
@@ -90,7 +94,8 @@ open class PlayerUnit protected constructor(
             attackResId = R.mipmap.unit_mage_attack,
             skillResId  = R.mipmap.unit_mage_skill,
             dieResId    = R.mipmap.unit_mage_die,
-            idleFps = 5f, attackFps = 8f, skillFps = 6f, dieFps = 7f,
+            idleFps = 8f, attackFps = 9f, skillFps = 9f, dieFps = 9f,
+            size = 102f,
         ),
         CLERIC(
             Balance.Unit.clericHp, Balance.Unit.clericDef, Balance.Unit.clericMr,
@@ -102,7 +107,8 @@ open class PlayerUnit protected constructor(
             attackResId = R.mipmap.unit_cleric_attack,
             skillResId  = R.mipmap.unit_cleric_skill,
             dieResId    = R.mipmap.unit_cleric_die,
-            idleFps = 5f, attackFps = 8f, skillFps = 6f, dieFps = 7f,
+            idleFps = 8f, attackFps = 9f, skillFps = 9f, dieFps = 9f,
+            size = 180f,
         ),
     }
 
@@ -115,10 +121,16 @@ open class PlayerUnit protected constructor(
     val skillReady get() = sp >= Balance.Unit.maxSp
 
     private var attackCooldown = 0f
-    private var pendingRemoval = false
+
+    // DIE 애니메이션 재생 후 world 제거를 PlacementController 에 알리는 콜백.
+    // PlacementController 가 배치 시 등록하고, 사망 처리가 끝나면 호출된다.
+    var onDied: (() -> Unit)? = null
+
+    // 사망 처리가 이미 시작됐는지 여부 (중복 호출 방지)
+    private var dyingStarted = false
 
     init {
-        setSize(Balance.Unit.unitSize, Balance.Unit.unitSize)
+        setSize(unitType.size, unitType.size)
         registerAnim(State.ATTACK, unitType.attackResId ?: unitType.idleResId, unitType.attackFps)
         registerAnim(State.SKILL,  unitType.skillResId  ?: unitType.idleResId, unitType.skillFps)
         registerAnim(State.DIE,    unitType.dieResId    ?: unitType.idleResId, unitType.dieFps)
@@ -126,14 +138,17 @@ open class PlayerUnit protected constructor(
 
     // ───── 업데이트 ──────────────────────────────────────────────────────────
     override fun update(gctx: GameContext) {
-        if (pendingRemoval) {
-            if (deathAnimDone) {
-                gctx.mainWorld().remove(this, MainScene.Layer.UNIT)
-            }
+        // DIE 애니메이션이 끝나면 콜백을 호출해 world 에서 제거하게 한다.
+        if (dyingStarted) {
+            if (isDieAnimFinished()) onDied?.invoke()
             return
         }
 
         sp = (sp + Balance.Unit.spChargeRate * gctx.frameTime).coerceAtMost(Balance.Unit.maxSp)
+
+        // 스킬 애니메이션 재생 중이면 공격 시도 안 함.
+        // 공격 애니메이션 중에는 공격 가능 (attackCooldown 이 자연스럽게 막음).
+        if (currentState == State.SKILL) return
 
         attackCooldown -= gctx.frameTime
         if (attackCooldown > 0f) return
@@ -147,9 +162,11 @@ open class PlayerUnit protected constructor(
     // ── 스킬 발동 ─────────────────────────────────────────────────────────────
     fun activateSkill(gctx: GameContext): Boolean {
         if (!skillReady) return false
+        // 공격 중에는 스킬 사용 가능, 스킬 중에는 재발동 불가
+        if (currentState == State.SKILL) return false
         sp = 0f
-        playAnim(State.SKILL, 1200L)
         onSkillActivated(gctx)
+        playAnim(State.SKILL, durationMs = 1500L)
         return true
     }
 
@@ -268,22 +285,28 @@ open class PlayerUnit protected constructor(
 
     // ───── HP 관리 ───────────────────────────────────────────────────────────
     fun takeDamage(amount: Float) {
-        if (pendingRemoval) return
+        if (dyingStarted) return
         val actual = Balance.DamageCalc.physical(amount, unitType.defense)
         hp = (hp - actual).coerceAtLeast(0f)
         if (hp <= 0f) startDying()
     }
 
     fun heal(amount: Float) {
+        if (dyingStarted) return
         hp = (hp + amount).coerceAtMost(unitType.maxHp)
     }
 
     fun isDead() = hp <= 0f
 
     private fun startDying() {
-        if (pendingRemoval) return
-        pendingRemoval = true
-        playAnim(State.DIE)
+        if (dyingStarted) return
+        dyingStarted = true
+        // dieFps 와 프레임 수로 애니메이션 총 재생 시간을 계산한다.
+        // frameCount 는 playAnim 이후 setter 에서 자동 계산되므로,
+        // 여기서는 일반적인 사망 애니메이션 길이(1초)를 durationMs 로 사용한다.
+        // 에셋 프레임 수에 맞게 조절하려면 (frameCount / dieFps * 1000).toLong() 으로 바꾸면 된다.
+        val dieDurMs = (1000f / unitType.dieFps * 8).toLong()  // 약 8프레임 분량
+        playAnim(State.DIE, durationMs = dieDurMs)
     }
 
     fun placeAt(cx: Float, cy: Float) = setCenter(cx, cy)
@@ -291,16 +314,17 @@ open class PlayerUnit protected constructor(
     // ───── 드로우 ────────────────────────────────────────────────────────────
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
-        if (pendingRemoval) return
-        val barW = width * 0.9f
+        // 사망 중에는 체력바·SP바 숨김
+        if (dyingStarted) return
+        val barW    = Balance.Unit.hpBarWidth
         val barLeft = x - barW / 2f
         hpGauge.draw(canvas, barLeft, y + height / 2f + 2f, barW, hp / unitType.maxHp)
         val spY = y + height / 2f + 14f
         canvas.drawRoundRect(barLeft, spY, barLeft + barW, spY + 6f, 3f, 3f, spBgPaint)
         val spFill = barW * (sp / Balance.Unit.maxSp)
         if (spFill > 0f) {
-            canvas.drawRoundRect(barLeft, spY, barLeft + spFill, spY + 6f, 3f, 3f,
-                if (skillReady) spReadyPaint else spFillPaint)
+            val paint = if (skillReady) spReadyPaint else spFillPaint
+            canvas.drawRoundRect(barLeft, spY, barLeft + spFill, spY + 6f, 3f, 3f, paint)
         }
     }
 
